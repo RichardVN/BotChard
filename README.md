@@ -1,0 +1,1 @@
+BotChard - A Music Bot for Discord
