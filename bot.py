@@ -1,5 +1,6 @@
 import discord
 import random
+import asyncio
 
 from discord.ext import commands
 from credentials import bot_token
@@ -11,7 +12,20 @@ bot = commands.Bot(command_prefix=".")
 # bot is done preparing data received by Discord after successful login
 @bot.event
 async def on_ready():
+    await bot.change_presence(activity=discord.Game("sarcastic comments"))
     print("Bot is ready for use...")
+
+
+# handle command errors
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Please pass in required arguments for this command!")
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("You do not have the permissions to run this command!")
+    elif isinstance(error, commands.CommandNotFound):
+        await ctx.send("That command does not exist.")
+    print(error)
 
 
 # @bot.event
@@ -54,7 +68,8 @@ async def eight_ball(ctx, *question):
         " Yes – definitely.",
         "You may rely on it.",
     ]
-    if question == None:
+    print(question)
+    if question == ():
         await ctx.send("You didn't ask me a question...")
     elif question[-1].endswith("?") or question[0].lower() in question_words_set:
         await ctx.send(
@@ -62,6 +77,19 @@ async def eight_ball(ctx, *question):
         )
     else:
         await ctx.send("I would like you to phrase that as a question.")
+
+
+# clear message history
+@bot.command()
+async def purge(ctx, number_messages=1):
+    purge_message = (
+        "Yeeting last message."
+        if number_messages == 1
+        else f"Obliviate last {number_messages} messages."
+    )
+    await ctx.send(purge_message)
+    await asyncio.sleep(4)
+    await ctx.channel.purge(limit=number_messages + 2)
 
 
 # @bot.command()
