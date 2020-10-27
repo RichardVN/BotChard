@@ -2,8 +2,23 @@ import discord
 import random
 import asyncio
 
+# FIXME:
+import spotipy
+
+# FIXME: youtube player?
+import youtube_dl
+import os
+
+from discord.utils import get
 from discord.ext import commands
-from credentials import bot_token
+from collections import deque
+from credentials import BOT_TOKEN
+
+# dict of players in form {server_id : player}
+players = dict()
+
+# song queue
+song_queue = deque()
 
 # create bot
 bot = commands.Bot(command_prefix=".")
@@ -28,15 +43,6 @@ async def on_command_error(ctx, error):
     print(error)
 
 
-# @bot.event
-# async def on_member_join(member):
-#     print(f'{member} has joined the server!')
-
-# @bot.event
-# async def on_member_remove(member):
-#     print(f'{member} has left the server.')
-
-
 @bot.command()
 async def ping(ctx):
     await ctx.send(f"Pong! Your latency is {round(bot.latency * 1000)} ms.")
@@ -45,7 +51,18 @@ async def ping(ctx):
 # alias allows users to call command via different names
 @bot.command(aliases=["8ball", "8 ball", "8_ball", "ball", "ask", "question"])
 async def eight_ball(ctx, *question):
-    question_words_set = {"who", "what", "when", "where", "why", "how", "whom"}
+    question_words_set = {
+        "who",
+        "what",
+        "when",
+        "where",
+        "why",
+        "how",
+        "whom",
+        "is",
+        "are",
+        "am",
+    }
     eight_ball_responses = [
         "As I see it, yes.",
         " Ask again later.",
@@ -81,7 +98,9 @@ async def eight_ball(ctx, *question):
 
 # clear message history
 @bot.command()
+@commands.has_permissions(manage_messages=True)
 async def purge(ctx, number_messages=1):
+    number_messages = min(number_messages, 25)
     purge_message = (
         "Yeeting last message."
         if number_messages == 1
@@ -92,10 +111,161 @@ async def purge(ctx, number_messages=1):
     await ctx.channel.purge(limit=number_messages + 2)
 
 
-# @bot.command()
-# async def shutdown(ctx):
-#     await ctx.bot.logout()
+# music functionalities
+@bot.command()
+async def join(ctx):
+    channel = ctx.message.author.voice.channel
+    if not channel:
+        ctx.send("Connect to a voice channel before using this command.")
+        return
+    voice = ctx.message.guild.voice_client
+    # move bot from existing vc
+    if voice and voice.is_connected():
+        await voice.move_to(channel)
+    # bot not in any vc
+    else:
+        voice = await channel.connect()
+
+
+@bot.command(pass_context=True)
+async def leave(ctx):
+    voice = ctx.message.guild.voice_client
+    if voice:
+        await voice.disconnect()
+    else:
+        await ctx.send("I am not currently in any voice channels.")
+
+
+# TODO:
+@bot.command(pass_context=True, aliases=["p", "pla"])
+async def play(ctx, url: str):
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    if voice.is_playing():
+        await ctx.send("There is already a song playing.")
+        return
+
+    song_there = os.path.isfile("song.mp3")
+    try:
+        if song_there:
+            os.remove("song.mp3")
+            print("Removed old song file")
+    except PermissionError:
+        print("Trying to delete song file, but it's being played")
+        await ctx.send("ERROR: Music playing")
+        return
+
+    await ctx.send("Song request received")
+
+    voice = get(bot.voice_clients, guild=ctx.guild)
+
+    dl_youtube_song(url)
+
+    for file in os.listdir("./"):
+        if file.endswith(".mp3"):
+            name = file
+            print(f"Renamed File: {file}\n")
+            os.rename(file, "song.mp3")
+
+    voice.play(discord.FFmpegPCMAudio("song.mp3"), after=lambda e: print("Song done!"))
+
+    # add transformer to change volume
+    voice.source = discord.PCMVolumeTransformer(voice.source)
+    voice.source.volume = 0.04
+
+    await display_song(ctx, name)
+
+
+@bot.command(
+    pass_context=True,
+    aliases=["Pause", "Stop", "stop"],
+)
+async def pause(ctx):
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    voice.pause()
+
+
+@bot.command(
+    pass_context=True, brief="Resumes the music that is playing", aliases=["Resume"]
+)
+async def resume(ctx):
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    voice.resume()
+
+
+@bot.command(
+    pass_context=True, brief="Skips the music that is playing", aliases=["Skip"]
+)
+async def skip(ctx):
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    voice.stop()
+
+
+@bot.command(aliases=["add", "push"])
+async def add_song(ctx, url: str):
+    song_queue.append(url)
+    await ctx.send("Added song to back of queue")
+    await display_queue(ctx)
+
+
+@bot.command(aliases=["removefront", "removenext"])
+async def remove_front(ctx):
+    try:
+        song_queue.popleft()
+        await ctx.send("Removed song from front of queue.")
+        await display_queue(ctx)
+    except IndexError:
+        await ctx.send("Nothing to remove from empty queue.")
+
+
+@bot.command(aliases=["remove", "removeback", "removelast"])
+async def remove_back(ctx):
+    try:
+        song_queue.pop()
+        await ctx.send("Removed song from back of queue.")
+        await display_queue(ctx)
+    except IndexError:
+        await ctx.send("Queue is empty - Nothing to remove.")
+
+
+# TODO: volume function
+@bot.command()
+async def set_volume(ctx, volume):
+    pass
+
+
+async def display_song(ctx, song_name):
+    song_name = song_name.rsplit("-", 1)
+    await ctx.send(f"Playing: {song_name[0]}")
+    print(f"Playing: {song_name[0]}")
+
+
+async def display_queue(ctx):
+    if len(song_queue) > 0:
+        queue_display = ""
+        for idx, song in enumerate(song_queue, start=1):
+            queue_display += f"\n{idx}. {song}"
+        await ctx.send(queue_display)
+    else:
+        await ctx.send("Song queue is empty!")
+
+
+def dl_youtube_song(url):
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+    }
+
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        print("Downloading audio now\n")
+        ydl.download([url])
+        print("finish")
 
 
 # run bot with token (link code to app so code can manipulate app)
-bot.run(bot_token)
+bot.run(BOT_TOKEN)
