@@ -89,9 +89,8 @@ async def eight_ball(ctx, *question):
     if question == ():
         await ctx.send("You didn't ask me a question...")
     elif question[-1].endswith("?") or question[0].lower() in question_words_set:
-        await ctx.send(
-            f"Your question:{question} " + random.choice(eight_ball_responses)
-        )
+        await ctx.send(random.choice(eight_ball_responses))
+
     else:
         await ctx.send("I would like you to phrase that as a question.")
 
@@ -139,34 +138,39 @@ async def leave(ctx):
 # TODO:
 @bot.command(pass_context=True, aliases=["p", "pla"])
 async def play(ctx, url: str):
+    # bot must be in voice channel. Get voice client
     voice = get(bot.voice_clients, guild=ctx.guild)
+
+    # return if play is called while a song is playing
     if voice.is_playing():
         await ctx.send("There is already a song playing.")
         return
 
-    song_there = os.path.isfile("song.mp3")
-    try:
-        if song_there:
-            os.remove("song.mp3")
-            print("Removed old song file")
-    except PermissionError:
-        print("Trying to delete song file, but it's being played")
-        await ctx.send("ERROR: Music playing")
-        return
+    # if play is called from empty queue, initialize queue with song
+    if not song_queue:
+        song_queue.append(url)
 
+    await play_next_song(ctx, song_queue.pop(), voice)
+
+
+# TODO:
+async def play_next_song(ctx, url, voice):
+    # clear any old mp3
+    remove_mp3()
     await ctx.send("Song request received")
 
-    voice = get(bot.voice_clients, guild=ctx.guild)
-
     dl_youtube_song(url)
-
     for file in os.listdir("./"):
         if file.endswith(".mp3"):
             name = file
             print(f"Renamed File: {file}\n")
-            os.rename(file, "song.mp3")
+            os.rename(file, "current_song.mp3")
 
-    voice.play(discord.FFmpegPCMAudio("song.mp3"), after=lambda e: print("Song done!"))
+    voice.play(
+        discord.FFmpegPCMAudio("current_song.mp3"),
+        # AFTER SONG COMPLETION
+        after=lambda e: print("finished current song"),
+    )
 
     # add transformer to change volume
     voice.source = discord.PCMVolumeTransformer(voice.source)
@@ -227,7 +231,7 @@ async def remove_back(ctx):
         await ctx.send("Queue is empty - Nothing to remove.")
 
 
-# TODO: volume function
+# FIXME: volume function
 @bot.command()
 async def set_volume(ctx, volume):
     pass
@@ -240,7 +244,7 @@ async def display_song(ctx, song_name):
 
 
 async def display_queue(ctx):
-    if len(song_queue) > 0:
+    if song_queue:
         queue_display = ""
         for idx, song in enumerate(song_queue, start=1):
             queue_display += f"\n{idx}. {song}"
@@ -265,6 +269,13 @@ def dl_youtube_song(url):
         print("Downloading audio now\n")
         ydl.download([url])
         print("finish")
+
+
+def remove_mp3():
+    song_there = os.path.isfile("song.mp3")
+    if song_there:
+        os.remove("song.mp3")
+        print("Removed old song file")
 
 
 # run bot with token (link code to app so code can manipulate app)
