@@ -2,4 +2,4 @@
 .vscode
 requirements.txt
 credentials*
-song.mp3
+*.mp3
