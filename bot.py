@@ -1,18 +1,14 @@
-import discord
-import random
 import asyncio
-
-# FIXME:
-import spotipy
-
-# FIXME: youtube player?
-import re
-import youtube_dl
 import os
-
-from discord.utils import get
-from discord.ext import commands, tasks
+import random
+import re
 from collections import deque
+
+import discord
+import youtube_dl
+from discord.ext import commands, tasks
+from discord.utils import get
+
 from credentials import BOT_TOKEN
 
 youtube_dl.utils.bug_reports_message = lambda: ""
@@ -37,7 +33,7 @@ ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
+    def __init__(self, source, *, data, volume=0.3):
         super().__init__(source, volume)
 
         self.data = data
@@ -79,7 +75,7 @@ async def on_ready():
     change_status.start()
 
 
-# bot status options
+# bot status options. Displays as "Playing: {status_choice}"
 status_list = [
     "Boba Assimilator",
     "Sarcasm Generator",
@@ -88,6 +84,7 @@ status_list = [
     "Binary Rock",
     "IU Best Hits",
     "Android X Mingle",
+    "With hearts",
 ]
 # randomly pick status
 @tasks.loop(seconds=180)
@@ -98,7 +95,7 @@ async def change_status():
 # TODO:
 @bot.command()
 async def autoplay(ctx):
-    ctx.send("Autoplay enabled for queued songs.")
+    await ctx.send("Autoplay enabled for queued songs.")
     check_next_song_ready.start(ctx)
 
 
@@ -258,15 +255,23 @@ async def play(ctx, url=None):
     else:
         # no url provided, play next song from queue
         if song_queue:
-            # TODO: refactor
-            async with ctx.typing():
-                player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
-                voice_channel.play(
-                    player, after=lambda e: print("Player error: %s" % e) if e else None
-                )
+            try:
+                # TODO: refactor
+                async with ctx.typing():
+                    print("play begin")
+                    player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
 
-            await ctx.send("**Now Playing:**\n{}".format(player.title))
-            del song_queue[0]
+                    voice_channel.play(
+                        player,
+                        after=lambda e: print("Player error: %s" % e) if e else None,
+                    )
+                await ctx.send("**Now Playing:**\n{}".format(player.title))
+
+            except:
+                print("Error occured. Removing song from queue")
+                pass
+            finally:
+                del song_queue[0]
             #
         else:
             await ctx.send(
@@ -298,6 +303,20 @@ async def skip(ctx):
     await ctx.send("Ended current song. Call `.play` to play next song.")
     voice = get(bot.voice_clients, guild=ctx.guild)
     voice.stop()
+
+
+@bot.command(aliases=["addfront", "addleft", "pushleft" "pushfront"])
+async def add_song_front(ctx, url: str):
+    pattern = re.compile(r"^(https?\:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$")
+    url_match = pattern.search(url)
+    if url_match:
+        song_queue.appendleft(url)
+        await ctx.send("Added song to front of queue")
+        await display_queue(ctx)
+    else:
+        await ctx.send(
+            "Unable to find url. Enqueue song using format `.add <youtube_url>`"
+        )
 
 
 @bot.command(aliases=["add", "push"])
@@ -340,9 +359,21 @@ async def show_queue(ctx):
 
 
 # FIXME: volume function
-@bot.command()
+@bot.command(aliases=["volume", "vol", "setvolume"])
 async def set_volume(ctx, volume):
-    pass
+
+    # bot must be in voice channel. Get voice client
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    # PCMTransformer(Original audio source, volume to change to) .. volume 1.0 means no volume change
+    voice.source = discord.PCMVolumeTransformer(voice.source, volume=1.0)
+
+    input_vol = float(volume)       
+    input_vol = min(input_vol, 2)       # cap volume increase to 2x
+    input_vol = max(input_vol, 0.5)     # cap volume decrease to half
+
+    # change voice.source volume
+    voice.source.volume = input_vol
+    print(f"volume is set to {voice.source.volume}")
 
 
 async def display_song(ctx, song_name):
