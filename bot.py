@@ -243,14 +243,25 @@ async def play(ctx, url=None):
     if url:
         song_queue.appendleft(url)
 
-        async with ctx.typing():
-            player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
-            voice_channel.play(
-                player, after=lambda e: print("Player error: %s" % e) if e else None
-            )
+        # TODO: Refactor
+        try:
+            # TODO: refactor
+            async with ctx.typing():
+                print("play begin")
+                player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
 
-        await ctx.send("**Now Playing:**\n{}".format(player.title))
-        del song_queue[0]
+                voice_channel.play(
+                    player,
+                    after=lambda e: print("Player error: %s" % e) if e else None,
+                )
+            await ctx.send("**Now Playing:**\n{}".format(player.title))
+
+        except Exception as e:
+            print("EXCEPTION BLOCK: Error occured. Removing song from queue", e)
+            await ctx.send("Error occured. Removing song from queue")
+            pass
+        finally:
+            del song_queue[0]
         #
     else:
         # no url provided, play next song from queue
@@ -267,12 +278,13 @@ async def play(ctx, url=None):
                     )
                 await ctx.send("**Now Playing:**\n{}".format(player.title))
 
-            except:
-                print("Error occured. Removing song from queue")
+            except Exception as e:
+                print("EXCEPTION BLOCK: Error occured. Removing song from queue", e)
+                await ctx.send("Error occured. Removing song from queue")
                 pass
             finally:
                 del song_queue[0]
-            #
+
         else:
             await ctx.send(
                 "You must specify a url after `.play` when using command with empty queue."
@@ -358,6 +370,24 @@ async def show_queue(ctx):
     await display_queue(ctx)
 
 
+# # FIXME: volume function
+# @bot.command(aliases=["volume", "vol", "setvolume"])
+# async def set_volume(ctx, volume):
+
+#     # bot must be in voice channel. Get voice client
+#     voice = get(bot.voice_clients, guild=ctx.guild)
+#     # PCMTransformer(Original audio source, volume to change to) .. volume 1.0 means no volume change
+#     voice.source = discord.PCMVolumeTransformer(voice.source, volume=1.0)
+
+#     input_vol = float(volume)
+#     input_vol = min(input_vol, 2)       # cap volume increase to 2x
+#     input_vol = max(input_vol, 0.5)     # cap volume decrease to half
+
+#     # change voice.source volume
+#     voice.source.volume = input_vol
+#     print(f"volume is set to {voice.source.volume}")
+
+g_volume = 1
 # FIXME: volume function
 @bot.command(aliases=["volume", "vol", "setvolume"])
 async def set_volume(ctx, volume):
@@ -367,9 +397,9 @@ async def set_volume(ctx, volume):
     # PCMTransformer(Original audio source, volume to change to) .. volume 1.0 means no volume change
     voice.source = discord.PCMVolumeTransformer(voice.source, volume=1.0)
 
-    input_vol = float(volume)       
-    input_vol = min(input_vol, 2)       # cap volume increase to 2x
-    input_vol = max(input_vol, 0.5)     # cap volume decrease to half
+    input_vol = float(volume)
+    input_vol = min(input_vol, 2)  # cap volume increase to 2x
+    input_vol = max(input_vol, 0.5)  # cap volume decrease to half
 
     # change voice.source volume
     voice.source.volume = input_vol
