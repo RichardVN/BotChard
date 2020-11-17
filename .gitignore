@@ -1,7 +1,7 @@
 /venv
 .vscode
 requirements.txt
-credentials*
+credentials.py
 *.mp3
 *.webm
 *.m4a
