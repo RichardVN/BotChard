@@ -432,23 +432,23 @@ def extension_cleanup(extension):
             os.unlink(file_directory + "/" + file)
 
 
-# def dl_youtube_song(url):
-#     """ Download from youtube url as mp3 """
-#     ydl_opts = {
-#         "format": "bestaudio/best",
-#         "postprocessors": [
-#             {
-#                 "key": "FFmpegExtractAudio",
-#                 "preferredcodec": "mp3",
-#                 "preferredquality": "192",
-#             }
-#         ],
-#     }
+def dl_youtube_song(url):
+    """ Download from youtube url as mp3 """
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+    }
 
-#     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-#         print("Downloading audio now\n")
-#         ydl.download([url])
-#         print("finish")
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        print("Downloading audio now\n")
+        ydl.download([url])
+        print("finish")
 
 
 # run bot with token (link code to app so code can manipulate app)
