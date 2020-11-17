@@ -1,21 +1,60 @@
-import discord
-import random
 import asyncio
-
-# FIXME:
-import spotipy
-
-# FIXME: youtube player?
-import youtube_dl
 import os
-
-from discord.utils import get
-from discord.ext import commands
+import random
+import re
 from collections import deque
+
+import discord
+import youtube_dl
+from discord.ext import commands, tasks
+from discord.utils import get
+
 from credentials import BOT_TOKEN
 
-# dict of players in form {server_id : player}
-players = dict()
+youtube_dl.utils.bug_reports_message = lambda: ""
+
+ytdl_format_options = {
+    "format": "bestaudio/best",
+    "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
+    "restrictfilenames": True,
+    "noplaylist": True,
+    "nocheckcertificate": True,
+    "ignoreerrors": False,
+    "logtostderr": False,
+    "quiet": True,
+    "no_warnings": True,
+    "default_search": "auto",
+    "source_address": "0.0.0.0",  # bind to ipv4 since ipv6 addresses cause issues sometimes
+}
+
+ffmpeg_options = {"options": "-vn"}
+
+ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.3):
+        super().__init__(source, volume)
+
+        self.data = data
+
+        self.title = data.get("title")
+        self.url = data.get("url")
+
+    @classmethod
+    async def from_url(cls, url, *, loop=None, stream=False):
+        loop = loop or asyncio.get_event_loop()
+        data = await loop.run_in_executor(
+            None, lambda: ytdl.extract_info(url, download=not stream)
+        )
+
+        if "entries" in data:
+            # take first item from a playlist
+            data = data["entries"][0]
+
+        filename = data["url"] if stream else ytdl.prepare_filename(data)
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+
 
 # song queue
 song_queue = deque()
@@ -23,12 +62,53 @@ song_queue = deque()
 # create bot
 bot = commands.Bot(command_prefix=".")
 
+# song queue
+song_queue = deque()
+
+
 # listen for events: actions that happen in server
 # bot is done preparing data received by Discord after successful login
 @bot.event
 async def on_ready():
-    await bot.change_presence(activity=discord.Game("sarcastic comments"))
     print("Bot is ready for use...")
+    # start status loop
+    change_status.start()
+
+
+# bot status options. Displays as "Playing: {status_choice}"
+status_list = [
+    "Boba Assimilator",
+    "Sarcasm Generator",
+    "Resting Dock",
+    "Chill Bot Vibes",
+    "Binary Rock",
+    "IU Best Hits",
+    "Android X Mingle",
+    "With hearts",
+]
+# randomly pick status
+@tasks.loop(seconds=180)
+async def change_status():
+    await bot.change_presence(activity=discord.Game(random.choice(status_list)))
+
+
+# TODO:
+@bot.command()
+async def autoplay(ctx):
+    await ctx.send("Autoplay enabled for queued songs.")
+    check_next_song_ready.start(ctx)
+
+
+@tasks.loop(seconds=10)
+async def check_next_song_ready(ctx):
+    global song_queue
+    # bot must be in voice channel. Get voice client
+    voice = get(bot.voice_clients, guild=ctx.guild)
+
+    if voice and not voice.is_playing() and song_queue:
+        await play(ctx, url=None)
+    else:
+        return
 
 
 # handle command errors
@@ -113,10 +193,12 @@ async def purge(ctx, number_messages=1):
 # music functionalities
 @bot.command()
 async def join(ctx):
-    channel = ctx.message.author.voice.channel
-    if not channel:
-        ctx.send("Connect to a voice channel before using this command.")
+    member_in_vc = ctx.message.author.voice
+    if not member_in_vc:
+        await ctx.send("User must be in a voice channel before using this command.")
         return
+    channel = ctx.message.author.voice.channel
+
     voice = ctx.message.guild.voice_client
     # move bot from existing vc
     if voice and voice.is_connected():
@@ -131,52 +213,83 @@ async def leave(ctx):
     voice = ctx.message.guild.voice_client
     if voice:
         await voice.disconnect()
+        extension_cleanup(".webm")
+        extension_cleanup(".m4a")
     else:
         await ctx.send("I am not currently in any voice channels.")
 
 
 # TODO:
-@bot.command(pass_context=True, aliases=["p", "pla"])
-async def play(ctx, url: str):
+@bot.command(name="play", help="This command plays songs")
+async def play(ctx, url=None):
+    global song_queue
+    server = ctx.message.guild
     # bot must be in voice channel. Get voice client
     voice = get(bot.voice_clients, guild=ctx.guild)
+    if not voice:
+        await ctx.send(
+            "You must summon the bot into voice channel using `.join` first!"
+        )
+        return
+    voice_channel = server.voice_client
 
-    # return if play is called while a song is playing
+    # cannot call play while voice is actively playing
     if voice.is_playing():
-        await ctx.send("There is already a song playing.")
+        await ctx.send(
+            "There is already a song playing. You may:\n  - add a song to queue using `.add`\n  - play song immediately by using `.pause` then `.play <url>`    "
+        )
         return
 
-    # if play is called from empty queue, initialize queue with song
-    if not song_queue:
-        song_queue.append(url)
+    # play url: if voice is paused or stopped
+    if url:
+        song_queue.appendleft(url)
 
-    await play_next_song(ctx, song_queue.pop(), voice)
+        # TODO: Refactor
+        try:
+            # TODO: refactor
+            async with ctx.typing():
+                print("play begin")
+                player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
 
+                voice_channel.play(
+                    player,
+                    after=lambda e: print("Player error: %s" % e) if e else None,
+                )
+            await ctx.send("**Now Playing:**\n{}".format(player.title))
 
-# TODO:
-async def play_next_song(ctx, url, voice):
-    # clear any old mp3
-    remove_mp3()
-    await ctx.send("Song request received")
+        except Exception as e:
+            print("EXCEPTION BLOCK: Error occured. Removing song from queue", e)
+            await ctx.send("Error occured. Removing song from queue")
+            pass
+        finally:
+            del song_queue[0]
+        #
+    else:
+        # no url provided, play next song from queue
+        if song_queue:
+            try:
+                # TODO: refactor
+                async with ctx.typing():
+                    print("play begin")
+                    player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
 
-    dl_youtube_song(url)
-    for file in os.listdir("./"):
-        if file.endswith(".mp3"):
-            name = file
-            print(f"Renamed File: {file}\n")
-            os.rename(file, "current_song.mp3")
+                    voice_channel.play(
+                        player,
+                        after=lambda e: print("Player error: %s" % e) if e else None,
+                    )
+                await ctx.send("**Now Playing:**\n{}".format(player.title))
 
-    voice.play(
-        discord.FFmpegPCMAudio("current_song.mp3"),
-        # AFTER SONG COMPLETION
-        after=lambda e: print("finished current song"),
-    )
+            except Exception as e:
+                print("EXCEPTION BLOCK: Error occured. Removing song from queue", e)
+                await ctx.send("Error occured. Removing song from queue")
+                pass
+            finally:
+                del song_queue[0]
 
-    # add transformer to change volume
-    voice.source = discord.PCMVolumeTransformer(voice.source)
-    voice.source.volume = 0.04
-
-    await display_song(ctx, name)
+        else:
+            await ctx.send(
+                "You must specify a url after `.play` when using command with empty queue."
+            )
 
 
 @bot.command(
@@ -200,15 +313,37 @@ async def resume(ctx):
     pass_context=True, brief="Skips the music that is playing", aliases=["Skip"]
 )
 async def skip(ctx):
+    await ctx.send("Ended current song. Call `.play` to play next song.")
     voice = get(bot.voice_clients, guild=ctx.guild)
     voice.stop()
 
 
+@bot.command(aliases=["addfront", "addleft", "pushleft" "pushfront"])
+async def add_song_front(ctx, url: str):
+    pattern = re.compile(r"^(https?\:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$")
+    url_match = pattern.search(url)
+    if url_match:
+        song_queue.appendleft(url)
+        await ctx.send("Added song to front of queue")
+        await display_queue(ctx)
+    else:
+        await ctx.send(
+            "Unable to find url. Enqueue song using format `.add <youtube_url>`"
+        )
+
+
 @bot.command(aliases=["add", "push"])
 async def add_song(ctx, url: str):
-    song_queue.append(url)
-    await ctx.send("Added song to back of queue")
-    await display_queue(ctx)
+    pattern = re.compile(r"^(https?\:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$")
+    url_match = pattern.search(url)
+    if url_match:
+        song_queue.append(url)
+        await ctx.send("Added song to back of queue")
+        await display_queue(ctx)
+    else:
+        await ctx.send(
+            "Unable to find url. Enqueue song using format `.add <youtube_url>`"
+        )
 
 
 @bot.command(aliases=["removefront", "removenext"])
@@ -231,10 +366,45 @@ async def remove_back(ctx):
         await ctx.send("Queue is empty - Nothing to remove.")
 
 
+@bot.command(aliases=["q", "list", "songlist"])
+async def show_queue(ctx):
+    await display_queue(ctx)
+
+
+# # FIXME: volume function
+# @bot.command(aliases=["volume", "vol", "setvolume"])
+# async def set_volume(ctx, volume):
+
+#     # bot must be in voice channel. Get voice client
+#     voice = get(bot.voice_clients, guild=ctx.guild)
+#     # PCMTransformer(Original audio source, volume to change to) .. volume 1.0 means no volume change
+#     voice.source = discord.PCMVolumeTransformer(voice.source, volume=1.0)
+
+#     input_vol = float(volume)
+#     input_vol = min(input_vol, 2)       # cap volume increase to 2x
+#     input_vol = max(input_vol, 0.5)     # cap volume decrease to half
+
+#     # change voice.source volume
+#     voice.source.volume = input_vol
+#     print(f"volume is set to {voice.source.volume}")
+
+g_volume = 1
 # FIXME: volume function
-@bot.command()
+@bot.command(aliases=["volume", "vol", "setvolume"])
 async def set_volume(ctx, volume):
-    pass
+
+    # bot must be in voice channel. Get voice client
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    # PCMTransformer(Original audio source, volume to change to) .. volume 1.0 means no volume change
+    voice.source = discord.PCMVolumeTransformer(voice.source, volume=1.0)
+
+    input_vol = float(volume)
+    input_vol = min(input_vol, 2)  # cap volume increase to 2x
+    input_vol = max(input_vol, 0.5)  # cap volume decrease to half
+
+    # change voice.source volume
+    voice.source.volume = input_vol
+    print(f"volume is set to {voice.source.volume}")
 
 
 async def display_song(ctx, song_name):
@@ -247,35 +417,38 @@ async def display_queue(ctx):
     if song_queue:
         queue_display = ""
         for idx, song in enumerate(song_queue, start=1):
-            queue_display += f"\n{idx}. {song}"
+            queue_display += f"\n**{idx}.**   {song}"
         await ctx.send(queue_display)
     else:
         await ctx.send("Song queue is empty!")
 
 
-def dl_youtube_song(url):
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }
-        ],
-    }
-
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        print("Downloading audio now\n")
-        ydl.download([url])
-        print("finish")
+def extension_cleanup(extension):
+    # Store path of directory containing file
+    print("cleaning up files ending in", extension)
+    file_directory = os.path.dirname(__file__)
+    for file in os.listdir(file_directory):
+        if file.endswith(extension):
+            os.unlink(file_directory + "/" + file)
 
 
-def remove_mp3():
-    song_there = os.path.isfile("song.mp3")
-    if song_there:
-        os.remove("song.mp3")
-        print("Removed old song file")
+# def dl_youtube_song(url):
+#     """ Download from youtube url as mp3 """
+#     ydl_opts = {
+#         "format": "bestaudio/best",
+#         "postprocessors": [
+#             {
+#                 "key": "FFmpegExtractAudio",
+#                 "preferredcodec": "mp3",
+#                 "preferredquality": "192",
+#             }
+#         ],
+#     }
+
+#     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+#         print("Downloading audio now\n")
+#         ydl.download([url])
+#         print("finish")
 
 
 # run bot with token (link code to app so code can manipulate app)

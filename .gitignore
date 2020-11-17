@@ -3,3 +3,7 @@
 requirements.txt
 credentials*
 *.mp3
+*.webm
+*.m4a
+*.pyc
+.DS*
