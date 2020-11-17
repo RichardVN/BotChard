@@ -6,3 +6,4 @@ credentials*
 *.webm
 *.m4a
 *.pyc
+.DS*

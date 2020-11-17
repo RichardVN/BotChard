@@ -214,6 +214,7 @@ async def leave(ctx):
     if voice:
         await voice.disconnect()
         extension_cleanup(".webm")
+        extension_cleanup(".m4a")
     else:
         await ctx.send("I am not currently in any voice channels.")
 
@@ -424,6 +425,7 @@ async def display_queue(ctx):
 
 def extension_cleanup(extension):
     # Store path of directory containing file
+    print("cleaning up files ending in", extension)
     file_directory = os.path.dirname(__file__)
     for file in os.listdir(file_directory):
         if file.endswith(extension):
