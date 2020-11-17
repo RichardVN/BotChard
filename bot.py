@@ -215,6 +215,7 @@ async def leave(ctx):
         await voice.disconnect()
         extension_cleanup(".webm")
         extension_cleanup(".m4a")
+        extension_cleanup(".mp3")
     else:
         await ctx.send("I am not currently in any voice channels.")
 

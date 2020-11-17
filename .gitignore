@@ -7,3 +7,4 @@ credentials.py
 *.m4a
 *.pyc
 .DS*
+__pycache__
