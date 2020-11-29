@@ -392,7 +392,7 @@ async def set_volume(ctx, volume):
     voice.source = discord.PCMVolumeTransformer(voice.source, volume=volume_change)
 
     print(f"\nvolume: {volume} volume ratio {volume_change} new global volume {global_volume}")
-    await ctx.send(f"Volume changed to {global_volume}.")
+    await ctx.send(f"Volume changed to {int(global_volume)}.")
 
     
     print(f"volume is increased/decreased to {voice.source.volume*100}% of original")
