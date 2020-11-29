@@ -372,40 +372,30 @@ async def show_queue(ctx):
     await display_queue(ctx)
 
 
-# # FIXME: volume function
-# @bot.command(aliases=["volume", "vol", "setvolume"])
-# async def set_volume(ctx, volume):
-
-#     # bot must be in voice channel. Get voice client
-#     voice = get(bot.voice_clients, guild=ctx.guild)
-#     # PCMTransformer(Original audio source, volume to change to) .. volume 1.0 means no volume change
-#     voice.source = discord.PCMVolumeTransformer(voice.source, volume=1.0)
-
-#     input_vol = float(volume)
-#     input_vol = min(input_vol, 2)       # cap volume increase to 2x
-#     input_vol = max(input_vol, 0.5)     # cap volume decrease to half
-
-#     # change voice.source volume
-#     voice.source.volume = input_vol
-#     print(f"volume is set to {voice.source.volume}")
-
-g_volume = 1
-# FIXME: volume function
+global_volume = 50
 @bot.command(aliases=["volume", "vol", "setvolume"])
 async def set_volume(ctx, volume):
+    # volume accepts input of 0 to 100
+    volume = int(volume)
+    volume = min(volume, 100)
+    volume = max(volume, 10)
+    # volume change ratio
+    global global_volume
+    volume_change = volume / global_volume
+    volume_change = min(volume_change, 3)
+    volume_change = max(volume_change, 0)
 
+    global_volume = global_volume * volume_change
     # bot must be in voice channel. Get voice client
     voice = get(bot.voice_clients, guild=ctx.guild)
     # PCMTransformer(Original audio source, volume to change to) .. volume 1.0 means no volume change
-    voice.source = discord.PCMVolumeTransformer(voice.source, volume=1.0)
+    voice.source = discord.PCMVolumeTransformer(voice.source, volume=volume_change)
 
-    input_vol = float(volume)
-    input_vol = min(input_vol, 2)  # cap volume increase to 2x
-    input_vol = max(input_vol, 0.5)  # cap volume decrease to half
+    print(f"\nvolume: {volume} volume ratio {volume_change} new global volume {global_volume}")
+    await ctx.send(f"Volume changed to {global_volume}.")
 
-    # change voice.source volume
-    voice.source.volume = input_vol
-    print(f"volume is set to {voice.source.volume}")
+    
+    print(f"volume is increased/decreased to {voice.source.volume*100}% of original")
 
 
 async def display_song(ctx, song_name):
