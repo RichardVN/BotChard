@@ -24,7 +24,8 @@ ytdl_format_options = {
     "quiet": True,
     "no_warnings": True,
     "default_search": "auto",
-    "source_address": "0.0.0.0",  # bind to ipv4 since ipv6 addresses cause issues sometimes
+    # bind to ipv4 since ipv6 addresses cause issues sometimes
+    "source_address": "0.0.0.0",
 }
 
 ffmpeg_options = {"options": "-vn"}
@@ -87,6 +88,8 @@ status_list = [
     "With hearts",
 ]
 # randomly pick status
+
+
 @tasks.loop(seconds=180)
 async def change_status():
     await bot.change_presence(activity=discord.Game(random.choice(status_list)))
@@ -220,11 +223,11 @@ async def leave(ctx):
         await ctx.send("I am not currently in any voice channels.")
 
 
-# TODO:
 @bot.command(name="play", help="This command plays songs")
 async def play(ctx, url=None):
     global song_queue
     server = ctx.message.guild
+
     # bot must be in voice channel. Get voice client
     voice = get(bot.voice_clients, guild=ctx.guild)
     if not voice:
@@ -244,49 +247,11 @@ async def play(ctx, url=None):
     # play url: if voice is paused or stopped
     if url:
         song_queue.appendleft(url)
-
-        # TODO: Refactor
-        try:
-            # TODO: refactor
-            async with ctx.typing():
-                print("play begin")
-                player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
-
-                voice_channel.play(
-                    player,
-                    after=lambda e: print("Player error: %s" % e) if e else None,
-                )
-            await ctx.send("**Now Playing:**\n{}".format(player.title))
-
-        except Exception as e:
-            print("EXCEPTION BLOCK: Error occured. Removing song from queue", e)
-            await ctx.send("Error occured. Removing song from queue")
-            pass
-        finally:
-            del song_queue[0]
-        #
+        await start_player(ctx, voice_channel)
     else:
         # no url provided, play next song from queue
         if song_queue:
-            try:
-                # TODO: refactor
-                async with ctx.typing():
-                    print("play begin")
-                    player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
-
-                    voice_channel.play(
-                        player,
-                        after=lambda e: print("Player error: %s" % e) if e else None,
-                    )
-                await ctx.send("**Now Playing:**\n{}".format(player.title))
-
-            except Exception as e:
-                print("EXCEPTION BLOCK: Error occured. Removing song from queue", e)
-                await ctx.send("Error occured. Removing song from queue")
-                pass
-            finally:
-                del song_queue[0]
-
+            await start_player(ctx, voice_channel)
         else:
             await ctx.send(
                 "You must specify a url after `.play` when using command with empty queue."
@@ -321,7 +286,8 @@ async def skip(ctx):
 
 @bot.command(aliases=["addfront", "addleft", "pushleft" "pushfront"])
 async def add_song_front(ctx, url: str):
-    pattern = re.compile(r"^(https?\:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$")
+    pattern = re.compile(
+        r"^(https?\:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$")
     url_match = pattern.search(url)
     if url_match:
         song_queue.appendleft(url)
@@ -335,7 +301,8 @@ async def add_song_front(ctx, url: str):
 
 @bot.command(aliases=["add", "push"])
 async def add_song(ctx, url: str):
-    pattern = re.compile(r"^(https?\:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$")
+    pattern = re.compile(
+        r"^(https?\:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$")
     url_match = pattern.search(url)
     if url_match:
         song_queue.append(url)
@@ -389,13 +356,33 @@ async def set_volume(ctx, volume):
     # bot must be in voice channel. Get voice client
     voice = get(bot.voice_clients, guild=ctx.guild)
     # PCMTransformer(Original audio source, volume to change to) .. volume 1.0 means no volume change
-    voice.source = discord.PCMVolumeTransformer(voice.source, volume=volume_change)
+    voice.source = discord.PCMVolumeTransformer(
+        voice.source, volume=volume_change)
 
-    print(f"\nvolume: {volume} volume ratio {volume_change} new global volume {global_volume}")
+    print(
+        f"\nvolume: {volume} volume ratio {volume_change} new global volume {global_volume}")
     await ctx.send(f"Volume changed to {int(global_volume)}.")
 
-    
-    print(f"volume is increased/decreased to {voice.source.volume*100}% of original")
+    print(
+        f"volume is increased/decreased to {voice.source.volume*100}% of original")
+
+
+async def start_player(ctx, voice_channel):
+    try:
+        async with ctx.typing():
+            print("play begin")
+            player = await YTDLSource.from_url(song_queue[0], loop=bot.loop)
+
+            voice_channel.play(
+                player,
+                after=lambda e: print("Player error: %s" % e) if e else None,
+            )
+        await ctx.send("**Now Playing:**\n{}".format(player.title))
+    except Exception as e:
+        print("EXCEPTION BLOCK: Error occured. Removing song from queue", e)
+        await ctx.send("Error occured. Removing song from queue")
+    finally:
+        del song_queue[0]
 
 
 async def display_song(ctx, song_name):
