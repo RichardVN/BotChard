@@ -28,7 +28,7 @@ $ pip3 install -r requirements.txt
 2. Select the discord application designated for your bot
 3. Select the Bot tab in the side menu and view your token
 4. Rename `credentials.py.example` to `credentials.py` and fill out your bot token value
-   - **DO NOT PUBLISH YOUR BOT TOKEN PUBLICLY**
+   - **DO NOT PUBLISH YOUR BOT TOKEN PUBLICLY. IF THIS HAPPENS, RESET TOKEN ON DISCORD PAGE**
     ```
     BOT_TOKEN = "Your Discord bot token here"
     ```
